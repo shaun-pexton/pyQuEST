@@ -446,22 +446,22 @@ cdef class PauliProduct(GlobalOperator):
     PAULI_REPR = {0: '', 1: 'X', 2: 'Y', 3: 'Z'}
 
     def __cinit__(self, pauli_terms):
-        cdef SingleQubitOperator term
+        cdef PauliOperator factor
         if isinstance(pauli_terms, BaseOperator):
             pauli_terms = [pauli_terms]
-        if any([term._num_controls for term in pauli_terms]):
+        if any([factor._num_controls for factor in pauli_terms]):
             raise ValueError("No controlled operators are allowed in PauliProduct.")
-        self._num_qubits = max([term._target for term in pauli_terms] + [0]) + 1  # 0-based index
+        self._num_qubits = max([factor._target for factor in pauli_terms] + [0]) + 1  # 0-based idx
         self._pauli_types = <pauliOpType*>calloc(self._num_qubits, sizeof(self._pauli_types[0]))
-        for term in pauli_terms:
-            if self._pauli_types[term._target] != 0:
+        for factor in pauli_terms:
+            if self._pauli_types[factor._target] != 0:
                 raise ValueError("Each qubit can only have one Pauli operator.")
-            if isinstance(term, X):
-                self._pauli_types[term._target] = pauliOpType.PAULI_X
-            elif isinstance(term, Y):
-                self._pauli_types[term._target] = pauliOpType.PAULI_Y
-            elif isinstance(term, Z):
-                self._pauli_types[term._target] = pauliOpType.PAULI_Z
+            if isinstance(factor, X):
+                self._pauli_types[factor._target] = pauliOpType.PAULI_X
+            elif isinstance(factor, Y):
+                self._pauli_types[factor._target] = pauliOpType.PAULI_Y
+            elif isinstance(factor, Z):
+                self._pauli_types[factor._target] = pauliOpType.PAULI_Z
             else:
                 raise ValueError("Only X, Y, and Z operators "
                                  "are valid in pauli_terms")
@@ -487,6 +487,10 @@ cdef class PauliProduct(GlobalOperator):
     @property
     def controls(self):
         return []
+
+    @property
+    def inverse(self):
+        return self
 
 
 cdef class Swap(MultiQubitOperator):

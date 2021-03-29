@@ -18,6 +18,7 @@ cdef class CompactU(SingleQubitOperator):
 
 
 cdef class PauliOperator(SingleQubitOperator):
+    pass
 
 
 cdef class X(PauliOperator):
