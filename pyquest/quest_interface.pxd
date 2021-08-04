@@ -74,6 +74,7 @@ cdef extern from "QuEST.h":
         SCALED_NORM
         INVERSE_NORM
         SCALED_INVERSE_NORM
+        SCALED_INVERSE_SHIFTED_NORM
         PRODUCT
         SCALED_PRODUCT
         INVERSE_PRODUCT
@@ -82,6 +83,7 @@ cdef extern from "QuEST.h":
         SCALED_DISTANCE
         INVERSE_DISTANCE
         SCALED_INVERSE_DISTANCE
+        SCALED_INVERSE_SHIFTED_DISTANCE
 
     # QuESTEnv methods
     QuESTEnv createQuESTEnv() except +
