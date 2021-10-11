@@ -86,6 +86,8 @@ cdef extern from "QuEST.h":
         SCALED_INVERSE_DISTANCE
         SCALED_INVERSE_SHIFTED_DISTANCE
 
+    void seedQuESTDefault()
+
     # QuESTEnv methods
     QuESTEnv createQuESTEnv() except +
     void destroyQuESTEnv(QuESTEnv env) except +
