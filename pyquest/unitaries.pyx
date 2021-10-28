@@ -532,6 +532,10 @@ cdef class BaseRotate(SingleQubitOperator):
     def angle(self, value):
         self._angle = value
 
+    @property
+    def inverse(self):
+        return type(self)(self._target, -self._angle, controls=self.controls)
+
 
 cdef class Rx(BaseRotate):
 
@@ -547,10 +551,6 @@ cdef class Rx(BaseRotate):
         else:
             quest.controlledRotateX(
                 c_register, self._controls[0], self._target, self._angle)
-
-    @property
-    def inverse(self):
-        return Rx(self._target, -self._angle, controls=self.controls)
 
 
 cdef class Ry(BaseRotate):
@@ -568,10 +568,6 @@ cdef class Ry(BaseRotate):
             quest.controlledRotateY(
                 c_register, self._controls[0], self._target, self._angle)
 
-    @property
-    def inverse(self):
-        return Ry(self._target, -self._angle, controls=self.controls)
-
 
 cdef class Rz(BaseRotate):
 
@@ -587,10 +583,6 @@ cdef class Rz(BaseRotate):
         else:
             quest.controlledRotateZ(
                 c_register, self._controls[0], self._target, self._angle)
-
-    @property
-    def inverse(self):
-        return Rz(self._target, -self._angle, controls=self.controls)
 
 
 cdef class Phase(BaseRotate):
