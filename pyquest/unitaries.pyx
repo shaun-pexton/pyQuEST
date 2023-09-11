@@ -247,18 +247,14 @@ cdef class X(PauliOperator):
 
     cdef int apply_to(self, Qureg c_register) except -1:
         if self._num_controls == 0:
-            if self._num_targets == 1:
-                quest.pauliX(c_register, self._targets[0])
-            else:
-                quest.multiQubitNot(c_register, self._targets,
-                                    self._num_targets)
-        elif self._num_controls == 1 and self._num_targets == 1:
+            quest.pauliX(c_register, self._target)
+        elif self._num_controls == 1:
             quest.controlledNot(
-                c_register, self._controls[0], self._targets[0])
+                c_register, self._controls[0], self._target)
         else:
             quest.multiControlledMultiQubitNot(
                 c_register, self._controls, self._num_controls,
-                self._targets, self._num_targets)
+                &self._target, 1)
 
 
 cdef class Y(PauliOperator):
