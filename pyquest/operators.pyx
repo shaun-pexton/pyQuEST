@@ -14,8 +14,6 @@ Classes:
         Base class for operators potentially acting on multiple qubits.
     MatrixOperator:
         Most generic operator, specified by its matrix representation.
-    PauliProduct:
-        A weighted product of Pauli operators.
     PauliSum:
         A sum of ´´PauliProduct´´s.
 """

@@ -53,13 +53,6 @@ cdef class DiagonalOperator(GlobalOperator):
     cdef quest.DiagonalOp _diag_op
 
 
-cdef class PauliProduct(GlobalOperator):
-    cdef int _num_qubits
-    cdef list _pauli_terms
-    cdef qreal _coefficient
-    cdef int *_pauli_codes
-
-
 cdef class PauliSum(GlobalOperator):
     cdef int _min_qubits
     cdef int _num_qubits
