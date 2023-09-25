@@ -436,6 +436,14 @@ cdef class PauliProduct(GlobalOperator):
         overall_factor %= 4
         coefficient[0] *= 1j ** overall_factor
 
+    @property
+    def pauli_types(self):
+        cdef int k
+        cdef list paulis = []
+        for k in range(self._num_qubits):
+            paulis.append(self._pauli_types[k])
+        return paulis
+
 
 cdef class PauliProduct(GlobalOperator):
 

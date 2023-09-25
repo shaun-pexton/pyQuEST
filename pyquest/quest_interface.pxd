@@ -26,6 +26,12 @@ ELIF QuEST_PREC == 4:
     ctypedef long double complex qcomp
 
 
+cdef extern from *:
+    """
+    #define QUEST_MAX_QUBITS 64
+    """
+    cdef const int MAX_QUBITS "QUEST_MAX_QUBITS"
+
 cdef extern from "quest_error.h":
     # Place ``#include "error_handler.h"`` in the .cxx files.
     pass

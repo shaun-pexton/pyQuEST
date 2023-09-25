@@ -15,7 +15,7 @@ Classes:
     MatrixOperator:
         Most generic operator, specified by its matrix representation.
     PauliSum:
-        A sum of ´´PauliProduct´´s.
+        A weighted sum of ``PauliProduct``s.
 """
 
 import enum
@@ -25,6 +25,7 @@ import cython
 import numpy as np
 import pyquest
 from pyquest.quest_error import QuESTError
+from pyquest.unitaries import PauliProduct, PauliOperator
 
 logger = logging.getLogger(__name__)
 
@@ -443,9 +444,297 @@ cdef class MatrixOperator(MultiQubitOperator):
 
 
 cdef class PauliSum(GlobalOperator):
-    def __cinit__(self):
+
+    _PAULI_REPR = {0: "", 1: "X", 2: "Y", 3: "Z"}
+    _MULTIPLICATION_TABLE = np.array([[0, 1, 2, 3],
+                                      [1, 0, 3, 2],
+                                      [2, 3, 0, 1],
+                                      [3, 2, 1, 0]], dtype=np.intc)
+
+    _MULTIPLICATION_FACTORS = np.array([[0, 0, 0, 0],
+                                        [0, 0, 1, 3],
+                                        [0, 3, 0, 1],
+                                        [0, 1, 3, 0]], dtype=np.intc)
+
+    def __cinit__(self, pauli_terms=None):
         self.TYPE = OP_TYPES.OP_PAULI_SUM
-        raise NotImplementedError("PauliSum not yet implemented.")
+        self._root = <PauliNode*>calloc(1, sizeof(PauliNode))
+        if pauli_terms is None:
+            return
+        # Offload all the conversion from various types to the
+        # constructor of PauliProduct.
+        try:
+            # First try to create a PauliProduct from whatever we got.
+            if not isinstance(pauli_terms, PauliProduct):
+                prod = PauliProduct(pauli_terms)
+            # If pauli_terms can be cast to a PauliProduct, its
+            # coefficient is implicitly assumed to be 1.
+            pauli_terms = ((1, prod),)
+        except (ValueError, TypeError):
+            pass
+        try:
+            for cur_term in pauli_terms:
+                self._add_term_from_PauliProduct(
+                    cur_term[0],
+                    cur_term[1] if isinstance(cur_term[1], PauliProduct)
+                                else PauliProduct(cur_term[1]))
+        except TypeError as exc:
+            raise TypeError("Unsupported type encountered in pauli_terms") from exc
+
+    def __str__(self):
+        return PauliSum._get_node_string(self._root, "", 0)[3:]
+
+    def __repr__(self):
+        return f"{type(self).__name__}({self.terms})"
+
+    def __mul__(PauliSum self, PauliSum other):
+        res = PauliSum()
+        PauliSum._multiply_subtrees(self._root, other._root, res._root, 0)
+        return res
+
+    def __add__(PauliSum self, PauliSum other):
+        res = PauliSum()
+        res._root.coefficient = self._root.coefficient + other._root.coefficient
+        PauliSum._add_subtree(self._root, res._root, 1)
+        PauliSum._add_subtree(other._root, res._root, 1)
+        return res
+
+    def __iadd__(PauliSum self, PauliSum other):
+        self._root.coefficient += other._root.coefficient
+        PauliSum._add_subtree(other._root, self._root, 1)
+        return self
+
+    def __dealloc__(self):
+        PauliSum._free_subtree(self._root)
+        free(self._root)
+
+    @property
+    def num_terms(self):
+        return PauliSum._num_subtree_terms(self._root)
+
+    @property
+    def num_qubits(self):
+        # Subtract 1 because the root alone doesn't need any qubits
+        return PauliSum._num_subtree_qubits(self._root) - 1
+
+    @property
+    def terms(self):
+        return self._node_terms(self._root, [])
+
+    cpdef void round(PauliSum self, qreal eps):
+        PauliSum._round_node(self._root, eps)
+
+    cpdef void compress(PauliSum self, qreal eps):
+        PauliSum._compress_node(self._root, eps)
+
+    cdef int apply_to(self, Qureg c_register) except -1:
+        cdef int num_terms = PauliSum._num_subtree_terms(self._root)
+        cdef int num_qubits = PauliSum._num_subtree_qubits(self._root) - 1
+        cdef int *prefix = <int*>malloc(num_qubits * sizeof(prefix[0]))
+        if num_terms > self._num_terms_reserved:
+            free(self._coefficients)
+            self._coefficients = <qreal*>malloc(num_terms * sizeof(self._coefficients[0]))
+            self._cache_valid = 0
+        if (num_terms * num_qubits
+                > self._num_terms_reserved * self._num_qubits_reserved):
+            free(self._pauli_codes)
+            self._pauli_codes = <int*>malloc(num_terms * num_qubits * sizeof(self._pauli_codes[0]))
+            self._cache_valid = 0
+        self._num_qubits_reserved = num_qubits
+        self._num_terms_reserved = num_terms
+        cdef int *pauli_ptr = self._pauli_codes
+        cdef qreal *coeff_ptr = self._coefficients
+        if not self._cache_valid:
+            PauliSum._expand_subtree_terms(self._root, num_qubits, prefix, 0, &coeff_ptr, &pauli_ptr)
+        cdef QuESTEnv *env_ptr = <QuESTEnv*>PyCapsule_GetPointer(pyquest.env.env_capsule, NULL)
+        cdef Qureg temp_reg = quest.createCloneQureg(c_register, env_ptr[0])
+        quest.applyPauliSum(temp_reg, <pauliOpType*>self._pauli_codes, self._coefficients, num_terms, c_register)
+
+    cdef int _add_term_from_PauliProduct(self, coeff, pauli_product) except -1:
+        cdef int paulis[MAX_QUBITS]
+        cdef int n = 0
+        # FIXME: This is probably inefficient, because it passes the
+        #        pauli_types through a Python list. cimporting
+        #        PauliProduct would fix this, but will create circular
+        #        imports. Redesign needed for speedup.
+        for cur_pauli in pauli_product.pauli_types:
+            if n > MAX_QUBITS:
+                raise ValueError("Trying to add Pauli terms on too many qubits")
+            paulis[n] = cur_pauli
+            n += 1
+        PauliSum._add_term(self._root, coeff, paulis, n)
+
+    cdef list _node_terms(PauliSum self, PauliNode* node, list prefix_list):
+        term_list = []
+        if node == NULL:
+            return term_list
+        if node[0].coefficient != 0:
+            term_list.append((node[0].coefficient, prefix_list))
+        for k in range(4):
+            if node[0].children[k] != NULL:
+                term_list.extend(self._node_terms(node[0].children[k], prefix_list + [k]))
+        return term_list
+
+    @staticmethod
+    cdef int _num_subtree_terms(PauliNode *node):
+        if node == NULL:
+            return 0
+        cdef int num = node.coefficient != 0
+        cdef int k
+        for k in range(4):
+            if node.children[k] == NULL:
+                continue
+            num += PauliSum._num_subtree_terms(node.children[k])
+        return num
+
+    @staticmethod
+    cdef int _num_subtree_qubits(PauliNode *node):
+        if node == NULL:
+            return 0
+        cdef int qubits_after = 0
+        cdef int k
+        for k in range(4):
+            if node.children[k] == NULL:
+                continue
+            qubits_after = max(qubits_after, PauliSum._num_subtree_qubits(node.children[k]))
+        return 1 + qubits_after
+
+    @staticmethod
+    cdef void _expand_subtree_terms(
+        PauliNode *node, int num_qubits, int* prefix, int num_prefix,
+        qreal **coefficients, int **pauli_terms):
+        cdef int k, n
+        if node.coefficient != 0:
+            for k in range(num_prefix):
+                pauli_terms[0][k] = prefix[k]
+            for k in range(num_prefix, num_qubits):
+                pauli_terms[0][k] = 0
+            pauli_terms[0] = &pauli_terms[0][num_qubits]
+            coefficients[0][0] = node.coefficient.real
+            coefficients[0] = &coefficients[0][1]
+        for n in range(4):
+            if node.children[n] == NULL:
+                continue
+            prefix[num_prefix] = n
+            PauliSum._expand_subtree_terms(
+                node.children[n], num_qubits, prefix, num_prefix + 1,
+                coefficients, pauli_terms)
+
+    @staticmethod
+    cdef void _add_term(PauliNode *root, qcomp coeff, int *paulis, int num_qubits):
+        cdef int k
+        cdef PauliNode *cur_node = root
+        for k in range(num_qubits):
+            if cur_node[0].children[paulis[k]] == NULL:
+                cur_node[0].children[paulis[k]] = <PauliNode*>calloc(1, sizeof(PauliNode))
+            cur_node = cur_node.children[paulis[k]]
+        cur_node[0].coefficient += coeff
+
+    @staticmethod
+    cdef str _get_node_string(PauliNode* node, str pauli_prefix, int cur_qubit):
+        if node == NULL:
+            return ""
+        if node.coefficient == 0:
+            res_str = ""
+        # This whole section is only necessary because Python can't
+        # compactly print complex numbers on its own.
+        elif (node.coefficient.real == 0):
+            if node.coefficient.imag < 0 or node.coefficient.real < 0:
+                res_str = f" - {-node.coefficient.imag}j{pauli_prefix}"
+            else:
+                res_str = f" + {node.coefficient.imag}j{pauli_prefix}"
+        elif (node.coefficient.imag == 0):
+            if node.coefficient.real < 0:
+                res_str = f" - {-node.coefficient.real}{pauli_prefix}"
+            else:
+                res_str = f" + {node.coefficient.real}{pauli_prefix}"
+        else:
+            res_str =  f" + {node[0].coefficient}{pauli_prefix}"
+        res_str += PauliSum._get_node_string(node[0].children[0], pauli_prefix, cur_qubit + 1)
+        for k in range(1, 4):
+            res_str += PauliSum._get_node_string(node[0].children[k], f"{pauli_prefix} {PauliSum._PAULI_REPR[k]}{cur_qubit}", cur_qubit + 1)
+        return res_str
+
+    @staticmethod
+    cdef void _multiply_subtrees(PauliNode *left, PauliNode *right, PauliNode *product, int prefact):
+        product.coefficient += left.coefficient * right.coefficient * 1j ** prefact
+        if left.coefficient != 0:
+            PauliSum._add_subtree(right, product, left.coefficient * 1j ** prefact)
+        if right.coefficient != 0:
+            PauliSum._add_subtree(left, product, right.coefficient * 1j ** prefact)
+        cdef int k, m, add_prefactor
+        for k in range(4):
+            if left.children[k] != NULL:
+                for m in range(4):
+                    if right.children[m] != NULL:
+                        # Potentially slow Python member retrieval
+                        cur_prod_pauli = PauliSum._MULTIPLICATION_TABLE[k, m]
+                        add_prefactor = PauliSum._MULTIPLICATION_FACTORS[k, m]
+                        if product.children[cur_prod_pauli] == NULL:
+                            product.children[cur_prod_pauli] = <PauliNode*>calloc(1, sizeof(PauliNode))
+                        PauliSum._multiply_subtrees(
+                                left.children[k], right.children[m],
+                                product.children[cur_prod_pauli], (prefact + add_prefactor) % 4)
+
+    @staticmethod
+    cdef void _add_subtree(PauliNode *source, PauliNode *target, qcomp factor):
+        cdef int k
+        for k in range(4):
+            if source.children[k] == NULL:
+                continue
+            if target.children[k] == NULL:
+                target.children[k] = <PauliNode*>calloc(1, sizeof(PauliNode))
+            target.children[k].coefficient += source.children[k].coefficient * factor
+            PauliSum._add_subtree(source.children[k], target.children[k], factor)
+
+    @staticmethod
+    cdef void _round_node(PauliNode *node, qreal eps):
+        if abs(node.coefficient.real) < eps:
+            node.coefficient.real = 0
+        if abs(node.coefficient.imag) < eps:
+            node.coefficient.imag = 0
+        cdef int k
+        for k in range(4):
+            if node.children[k] == NULL:
+                continue
+            PauliSum._round_node(node.children[k], eps)
+
+    @staticmethod
+    cdef int _compress_node(PauliNode *node, qreal eps):
+        # Returns 1 if the node has no more children after compressing,
+        # 0 otherwise.
+        cdef int no_children = 1
+        cdef int k
+        if node.children[0] != NULL:
+            # Identity terms should propagate upwards as far as possible.
+            no_children = PauliSum._compress_node(node.children[0], eps)
+            node.coefficient += node.children[0].coefficient
+            node.children[0].coefficient = 0
+            if no_children:
+                free(node.children[0])
+                node.children[0] = NULL
+        for k in range(1, 4):
+            if node.children[k] == NULL:
+                continue
+            if PauliSum._compress_node(node.children[k], eps):
+                if abs(node.children[k].coefficient) < eps:
+                    free(node.children[k])
+                    node.children[k] = NULL
+                else:
+                    no_children = 0
+        return no_children
+
+    @staticmethod
+    cdef void _free_subtree(PauliNode *node):
+        if node == NULL:
+            return
+        cdef int k
+        for k in range(4):
+            if node.children[k] == NULL:
+                continue
+            PauliSum._free_subtree(node.children[k])
+            free(node.children[k])
+            node.children[k] = NULL
 
 
 cdef class TrotterCircuit(GlobalOperator):
