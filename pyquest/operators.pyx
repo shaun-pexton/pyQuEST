@@ -507,6 +507,8 @@ cdef class PauliSum(GlobalOperator):
     def __dealloc__(self):
         PauliSum._free_subtree(self._root)
         free(self._root)
+        free(self._quest_hamil.pauliCodes)
+        free(self._quest_hamil.termCoeffs)
 
     @property
     def num_terms(self):
@@ -558,6 +560,7 @@ cdef class PauliSum(GlobalOperator):
         if not self._cache_valid:
             PauliSum._expand_subtree_terms(self._root, num_qubits, prefix, 0, &coeff_ptr, &pauli_ptr)
             self._cache_valid = 1
+        free(prefix)
         cdef QuESTEnv *env_ptr = <QuESTEnv*>PyCapsule_GetPointer(pyquest.env.env_capsule, NULL)
         cdef Qureg temp_reg = quest.createCloneQureg(c_register, env_ptr[0])
         quest.applyPauliHamil(temp_reg, self._quest_hamil, c_register)
