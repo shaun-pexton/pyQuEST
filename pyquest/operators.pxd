@@ -3,7 +3,7 @@ from libc.stdlib cimport malloc, calloc, free
 from cpython.pycapsule cimport PyCapsule_GetPointer
 cimport pyquest.quest_interface as quest
 from pyquest.quest_interface cimport qreal, qcomp, OP_TYPES, Qureg, pauliOpType
-from pyquest.quest_interface cimport phaseFunc, bitEncoding
+from pyquest.quest_interface cimport phaseFunc, bitEncoding, PauliHamil
 from pyquest.quest_interface cimport QuESTEnv, Complex, MAX_QUBITS
 from pyquest.quest_interface cimport ComplexMatrix2, ComplexMatrix4, ComplexMatrixN
 from pyquest.quest_interface cimport createComplexMatrixN, destroyComplexMatrixN
@@ -60,11 +60,10 @@ cdef struct PauliNode:
 
 cdef class PauliSum(GlobalOperator):
     cdef PauliNode *_root
+    cdef PauliHamil _quest_hamil
+    cdef int _num_paulis_allocated
+    cdef int _num_coeffs_allocated
     cdef int _cache_valid
-    cdef int _num_terms_reserved
-    cdef int _num_qubits_reserved
-    cdef int *_pauli_codes
-    cdef qreal *_coefficients
     cpdef void round(PauliSum self, qreal eps)
     cpdef void compress(PauliSum self, qreal eps)
     cdef int _add_term_from_PauliProduct(self, coeff, pauli_product) except -1
@@ -75,8 +74,8 @@ cdef class PauliSum(GlobalOperator):
     cdef int _num_subtree_qubits(PauliNode *node)
     @staticmethod
     cdef void _expand_subtree_terms(
-        PauliNode *node, int num_qubits, int* prefix, int num_prefix,
-        qreal **coefficients, int **pauli_terms)
+        PauliNode *node, int num_qubits, pauliOpType* prefix, int num_prefix,
+        qreal **coefficients, pauliOpType **pauli_terms)
     @staticmethod
     cdef void _add_term(PauliNode *root, qcomp coeff, int *paulis, int num_qubits)
     @staticmethod

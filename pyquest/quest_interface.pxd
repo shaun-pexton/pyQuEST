@@ -66,8 +66,6 @@ cdef extern from "QuEST.h":
         int isDensityMatrix
     ctypedef struct DiagonalOp:
         int numQubits
-    ctypedef struct PauliHamil:
-        pass
     ctypedef struct Vector:
         qreal x, y, z
     ctypedef enum pauliOpType:
@@ -75,6 +73,11 @@ cdef extern from "QuEST.h":
         PAULI_X = 1,
         PAULI_Y = 2,
         PAULI_Z = 3
+    ctypedef struct PauliHamil:
+        int numQubits
+        int numSumTerms
+        pauliOpType *pauliCodes
+        qreal *termCoeffs
     ctypedef enum bitEncoding:
         UNSIGNED
         TWOS_COMPLEMENT
@@ -169,6 +172,7 @@ cdef extern from "QuEST.h":
         qreal* overridePhases, int numOverrides) except +
     void applyPauliSum(Qureg inQureg, pauliOpType* allPauliCodes,
                        qreal* termCoeffs, int numSumTerms, Qureg outQureg) except +
+    void applyPauliHamil(Qureg inQureg, PauliHamil hamil, Qureg outQureg) except +
     void applyTrotterCircuit(Qureg qureg, PauliHamil hamil, qreal time,
                              int order, int reps) except +
     void applyQFT(Qureg qureg, int* qubits, int numQubits) except +

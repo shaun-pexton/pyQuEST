@@ -523,32 +523,44 @@ cdef class PauliSum(GlobalOperator):
 
     cpdef void round(PauliSum self, qreal eps):
         PauliSum._round_node(self._root, eps)
+        self._cache_valid = 0
 
     cpdef void compress(PauliSum self, qreal eps):
         PauliSum._compress_node(self._root, eps)
+        self._cache_valid = 0
 
     cdef int apply_to(self, Qureg c_register) except -1:
         cdef int num_terms = PauliSum._num_subtree_terms(self._root)
         cdef int num_qubits = PauliSum._num_subtree_qubits(self._root) - 1
-        cdef int *prefix = <int*>malloc(num_qubits * sizeof(prefix[0]))
-        if num_terms > self._num_terms_reserved:
-            free(self._coefficients)
-            self._coefficients = <qreal*>malloc(num_terms * sizeof(self._coefficients[0]))
+        if c_register.numQubitsRepresented < num_qubits:
+            raise ValueError(f"Register does not have enough qubits. Needs {num_qubits}, "
+                             f"but only has {c_register.numQubitsRepresented}.")
+        # QuEST needs the number of qubits in the Qureg
+        num_qubits = c_register.numQubitsRepresented
+        cdef pauliOpType *prefix = <pauliOpType*>malloc(num_qubits * sizeof(prefix[0]))
+        # Only ever increase allocated memory, there is no point in
+        # shrinking it just because the PauliSum is applied to a
+        # smaller Register.
+        if num_terms > self._quest_hamil.numSumTerms:
+            free(self._quest_hamil.termCoeffs)
+            self._quest_hamil.termCoeffs = <qreal*>malloc(num_terms * sizeof(self._quest_hamil.termCoeffs[0]))
             self._cache_valid = 0
-        if (num_terms * num_qubits
-                > self._num_terms_reserved * self._num_qubits_reserved):
-            free(self._pauli_codes)
-            self._pauli_codes = <int*>malloc(num_terms * num_qubits * sizeof(self._pauli_codes[0]))
+            self._num_coeffs_allocated = num_terms
+        if (num_terms * num_qubits > self._num_paulis_allocated):
+            free(self._quest_hamil.pauliCodes)
+            self._quest_hamil.pauliCodes = <pauliOpType*>malloc(num_terms * num_qubits * sizeof(self._quest_hamil.pauliCodes[0]))
             self._cache_valid = 0
-        self._num_qubits_reserved = num_qubits
-        self._num_terms_reserved = num_terms
-        cdef int *pauli_ptr = self._pauli_codes
-        cdef qreal *coeff_ptr = self._coefficients
+            self._num_paulis_allocated = num_terms * num_qubits
+        self._quest_hamil.numQubits = num_qubits
+        self._quest_hamil.numSumTerms = num_terms
+        cdef pauliOpType *pauli_ptr = self._quest_hamil.pauliCodes
+        cdef qreal *coeff_ptr = self._quest_hamil.termCoeffs
         if not self._cache_valid:
             PauliSum._expand_subtree_terms(self._root, num_qubits, prefix, 0, &coeff_ptr, &pauli_ptr)
+            self._cache_valid = 1
         cdef QuESTEnv *env_ptr = <QuESTEnv*>PyCapsule_GetPointer(pyquest.env.env_capsule, NULL)
         cdef Qureg temp_reg = quest.createCloneQureg(c_register, env_ptr[0])
-        quest.applyPauliSum(temp_reg, <pauliOpType*>self._pauli_codes, self._coefficients, num_terms, c_register)
+        quest.applyPauliHamil(temp_reg, self._quest_hamil, c_register)
 
     cdef int _add_term_from_PauliProduct(self, coeff, pauli_product) except -1:
         cdef int paulis[MAX_QUBITS]
@@ -601,27 +613,30 @@ cdef class PauliSum(GlobalOperator):
 
     @staticmethod
     cdef void _expand_subtree_terms(
-        PauliNode *node, int num_qubits, int* prefix, int num_prefix,
-        qreal **coefficients, int **pauli_terms):
+        PauliNode *node, int num_qubits, pauliOpType* prefix, int num_prefix,
+        qreal **coefficients, pauliOpType **pauli_terms):
         cdef int k, n
         if node.coefficient != 0:
             for k in range(num_prefix):
                 pauli_terms[0][k] = prefix[k]
             for k in range(num_prefix, num_qubits):
-                pauli_terms[0][k] = 0
+                pauli_terms[0][k] = pauliOpType.PAULI_I
             pauli_terms[0] = &pauli_terms[0][num_qubits]
             coefficients[0][0] = node.coefficient.real
             coefficients[0] = &coefficients[0][1]
         for n in range(4):
             if node.children[n] == NULL:
                 continue
-            prefix[num_prefix] = n
+            # This is probably safe on most compilers, but there might
+            # be a more elegant way to do this.
+            prefix[num_prefix] = <pauliOpType>n
             PauliSum._expand_subtree_terms(
                 node.children[n], num_qubits, prefix, num_prefix + 1,
                 coefficients, pauli_terms)
 
     @staticmethod
     cdef void _add_term(PauliNode *root, qcomp coeff, int *paulis, int num_qubits):
+        self._cache_valid = 0
         cdef int k
         cdef PauliNode *cur_node = root
         for k in range(num_qubits):
@@ -657,6 +672,7 @@ cdef class PauliSum(GlobalOperator):
 
     @staticmethod
     cdef void _multiply_subtrees(PauliNode *left, PauliNode *right, PauliNode *product, int prefact):
+        self._cache_valid = 0
         product.coefficient += left.coefficient * right.coefficient * 1j ** prefact
         if left.coefficient != 0:
             PauliSum._add_subtree(right, product, left.coefficient * 1j ** prefact)
@@ -678,6 +694,7 @@ cdef class PauliSum(GlobalOperator):
 
     @staticmethod
     cdef void _add_subtree(PauliNode *source, PauliNode *target, qcomp factor):
+        self._cache_valid = 0
         cdef int k
         for k in range(4):
             if source.children[k] == NULL:
@@ -689,6 +706,7 @@ cdef class PauliSum(GlobalOperator):
 
     @staticmethod
     cdef void _round_node(PauliNode *node, qreal eps):
+        self._cache_valid = 0
         if abs(node.coefficient.real) < eps:
             node.coefficient.real = 0
         if abs(node.coefficient.imag) < eps:
@@ -703,6 +721,7 @@ cdef class PauliSum(GlobalOperator):
     cdef int _compress_node(PauliNode *node, qreal eps):
         # Returns 1 if the node has no more children after compressing,
         # 0 otherwise.
+        self._cache_valid = 0
         cdef int no_children = 1
         cdef int k
         if node.children[0] != NULL:
