@@ -66,12 +66,16 @@ cdef class PauliSum(GlobalOperator):
     cdef int _cache_valid
     cpdef void round(PauliSum self, qreal eps)
     cpdef void compress(PauliSum self, qreal eps)
+    cpdef PauliSum copy(self)
+    cdef int _update_quest_hamil(self, int num_qubits) except -1
     cdef int _add_term_from_PauliProduct(self, coeff, pauli_product) except -1
     cdef list _node_terms(PauliSum self, PauliNode* node, list prefix_list)
     @staticmethod
     cdef int _num_subtree_terms(PauliNode *node)
     @staticmethod
     cdef int _num_subtree_qubits(PauliNode *node)
+    @staticmethod
+    cdef PauliNode* _copy_subtree(PauliNode *node)
     @staticmethod
     cdef void _expand_subtree_terms(
         PauliNode *node, int num_qubits, pauliOpType* prefix, int num_prefix,
@@ -93,7 +97,14 @@ cdef class PauliSum(GlobalOperator):
 
 
 cdef class TrotterCircuit(GlobalOperator):
-    pass
+    # Keep a whole PauliSum object instead of just a
+    # QuEST PauliHamil to use the functionality of
+    # expanding to different numbers of qubits before
+    # applying to a Register.
+    cdef PauliSum _hamil
+    cdef qreal _time
+    cdef int _order
+    cdef int _reps
 
 
 cdef class PhaseFunc(GlobalOperator):

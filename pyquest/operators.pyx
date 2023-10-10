@@ -531,14 +531,25 @@ cdef class PauliSum(GlobalOperator):
         PauliSum._compress_node(self._root, eps)
         self._cache_valid = 0
 
+    cpdef PauliSum copy(self):
+        cdef PauliSum copy_sum = PauliSum()
+        free(copy_sum._root)
+        copy_sum._root = PauliSum._copy_subtree(self._root)
+        return copy_sum
+
     cdef int apply_to(self, Qureg c_register) except -1:
+        self._update_quest_hamil(c_register.numQubitsRepresented)
+        # FIXME The env-pointer should really be loaded once module-wide
+        cdef QuESTEnv *env_ptr = <QuESTEnv*>PyCapsule_GetPointer(pyquest.env.env_capsule, NULL)
+        cdef Qureg temp_reg = quest.createCloneQureg(c_register, env_ptr[0])
+        quest.applyPauliHamil(temp_reg, self._quest_hamil, c_register)
+
+    cdef int _update_quest_hamil(self, int num_qubits) except -1:
+        cdef int num_tree_qubits = PauliSum._num_subtree_qubits(self._root) - 1
+        if num_qubits < num_tree_qubits:
+            raise ValueError(f"Register does not have enough qubits. Needs {num_tree_qubits}, "
+                             f"but only has {num_qubits}.")
         cdef int num_terms = PauliSum._num_subtree_terms(self._root)
-        cdef int num_qubits = PauliSum._num_subtree_qubits(self._root) - 1
-        if c_register.numQubitsRepresented < num_qubits:
-            raise ValueError(f"Register does not have enough qubits. Needs {num_qubits}, "
-                             f"but only has {c_register.numQubitsRepresented}.")
-        # QuEST needs the number of qubits in the Qureg
-        num_qubits = c_register.numQubitsRepresented
         cdef pauliOpType *prefix = <pauliOpType*>malloc(num_qubits * sizeof(prefix[0]))
         # Only ever increase allocated memory, there is no point in
         # shrinking it just because the PauliSum is applied to a
@@ -561,9 +572,6 @@ cdef class PauliSum(GlobalOperator):
             PauliSum._expand_subtree_terms(self._root, num_qubits, prefix, 0, &coeff_ptr, &pauli_ptr)
             self._cache_valid = 1
         free(prefix)
-        cdef QuESTEnv *env_ptr = <QuESTEnv*>PyCapsule_GetPointer(pyquest.env.env_capsule, NULL)
-        cdef Qureg temp_reg = quest.createCloneQureg(c_register, env_ptr[0])
-        quest.applyPauliHamil(temp_reg, self._quest_hamil, c_register)
 
     cdef int _add_term_from_PauliProduct(self, coeff, pauli_product) except -1:
         cdef int paulis[MAX_QUBITS]
@@ -615,6 +623,19 @@ cdef class PauliSum(GlobalOperator):
         return 1 + qubits_after
 
     @staticmethod
+    cdef PauliNode* _copy_subtree(PauliNode *node):
+        cdef int k
+        if node == NULL:
+            return NULL
+        cdef PauliNode *new_node = <PauliNode*>calloc(1, sizeof(PauliNode))
+        new_node.coefficient = node.coefficient
+        for k in range(4):
+            if node.children[k] == NULL:
+                continue
+            new_node.children[k] = PauliSum._copy_subtree(node.children[k])
+        return new_node
+
+    @staticmethod
     cdef void _expand_subtree_terms(
         PauliNode *node, int num_qubits, pauliOpType* prefix, int num_prefix,
         qreal **coefficients, pauliOpType **pauli_terms):
@@ -639,7 +660,6 @@ cdef class PauliSum(GlobalOperator):
 
     @staticmethod
     cdef void _add_term(PauliNode *root, qcomp coeff, int *paulis, int num_qubits):
-        self._cache_valid = 0
         cdef int k
         cdef PauliNode *cur_node = root
         for k in range(num_qubits):
@@ -675,7 +695,6 @@ cdef class PauliSum(GlobalOperator):
 
     @staticmethod
     cdef void _multiply_subtrees(PauliNode *left, PauliNode *right, PauliNode *product, int prefact):
-        self._cache_valid = 0
         product.coefficient += left.coefficient * right.coefficient * 1j ** prefact
         if left.coefficient != 0:
             PauliSum._add_subtree(right, product, left.coefficient * 1j ** prefact)
@@ -697,7 +716,6 @@ cdef class PauliSum(GlobalOperator):
 
     @staticmethod
     cdef void _add_subtree(PauliNode *source, PauliNode *target, qcomp factor):
-        self._cache_valid = 0
         cdef int k
         for k in range(4):
             if source.children[k] == NULL:
@@ -709,7 +727,6 @@ cdef class PauliSum(GlobalOperator):
 
     @staticmethod
     cdef void _round_node(PauliNode *node, qreal eps):
-        self._cache_valid = 0
         if abs(node.coefficient.real) < eps:
             node.coefficient.real = 0
         if abs(node.coefficient.imag) < eps:
@@ -724,7 +741,6 @@ cdef class PauliSum(GlobalOperator):
     cdef int _compress_node(PauliNode *node, qreal eps):
         # Returns 1 if the node has no more children after compressing,
         # 0 otherwise.
-        self._cache_valid = 0
         cdef int no_children = 1
         cdef int k
         if node.children[0] != NULL:
@@ -738,12 +754,16 @@ cdef class PauliSum(GlobalOperator):
         for k in range(1, 4):
             if node.children[k] == NULL:
                 continue
-            if PauliSum._compress_node(node.children[k], eps):
+            if not PauliSum._compress_node(node.children[k], eps):
+                no_children = 0
                 if abs(node.children[k].coefficient) < eps:
-                    free(node.children[k])
-                    node.children[k] = NULL
-                else:
-                    no_children = 0
+                    node.children[k].coefficient = 0
+                continue
+            if abs(node.children[k].coefficient) < eps:
+                free(node.children[k])
+                node.children[k] = NULL
+            else:
+                no_children = 0
         return no_children
 
     @staticmethod
@@ -761,9 +781,38 @@ cdef class PauliSum(GlobalOperator):
 
 cdef class TrotterCircuit(GlobalOperator):
 
-    def __cinit__(self):
+    def __cinit__(self, PauliSum hamiltonian, time, order=1, reps=1):
         self.TYPE = OP_TYPES.OP_TROTTER_CIRC
-        raise NotImplementedError("TrotterCircuit not yet implemented.")
+        self._time = time
+        self._order = order
+        self._reps = reps
+        self._hamil = hamiltonian.copy()
+
+    def __repr__(self):
+        return (
+            type(self).__name__
+            + "(hamil=" + self._hamil.__repr__()
+            + ", time=" + str(self._time)
+            + ", order=" + str(self._order)
+            + ", reps=" + str(self._reps) + ")")
+
+    @property
+    def time(self):
+        return self._time
+
+    @property
+    def order(self):
+        return self._order
+
+    @property
+    def reps(self):
+        return self._reps
+
+    cdef int apply_to(self, Qureg c_register) except -1:
+        self._hamil._update_quest_hamil(c_register.numQubitsRepresented)
+        quest.applyTrotterCircuit(
+                c_register, self._hamil._quest_hamil, self._time,
+                self._order, self._reps)
 
 
 cdef class DiagonalOperator(GlobalOperator):
