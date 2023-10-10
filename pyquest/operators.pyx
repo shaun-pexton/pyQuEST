@@ -21,6 +21,7 @@ Classes:
 import enum
 import logging
 from warnings import warn
+import numbers
 import cython
 import numpy as np
 import pyquest
@@ -461,6 +462,9 @@ cdef class PauliSum(GlobalOperator):
         self._root = <PauliNode*>calloc(1, sizeof(PauliNode))
         if pauli_terms is None:
             return
+        if isinstance(pauli_terms, numbers.Number):
+            self._root.coefficient = pauli_terms
+            return
         # Offload all the conversion from various types to the
         # constructor of PauliProduct.
         try:
@@ -472,6 +476,9 @@ cdef class PauliSum(GlobalOperator):
             pauli_terms = ((1, prod),)
         except (ValueError, TypeError):
             pass
+        # Otherwise assume we got a list of tuples, where the first
+        # element in each tuple is the coefficient, and the second can
+        # be cast into a PauliProduct.
         try:
             for cur_term in pauli_terms:
                 self._add_term_from_PauliProduct(
@@ -487,9 +494,13 @@ cdef class PauliSum(GlobalOperator):
     def __repr__(self):
         return f"{type(self).__name__}({self.terms})"
 
-    def __mul__(PauliSum self, PauliSum other):
-        res = PauliSum()
-        PauliSum._multiply_subtrees(self._root, other._root, res._root, 0)
+    def __mul__(left, right):
+        cdef PauliSum res = PauliSum()
+        if not isinstance(left, PauliSum):
+            left = PauliSum(left)
+        if not isinstance(right, PauliSum):
+            right = PauliSum(right)
+        PauliSum._multiply_subtrees((<PauliSum>left)._root, (<PauliSum>right)._root, res._root, 0)
         return res
 
     def __add__(PauliSum self, PauliSum other):
