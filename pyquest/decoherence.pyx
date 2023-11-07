@@ -14,6 +14,10 @@ cdef class Dephasing(MultiQubitOperator):
             raise ValueError("Dephasing noise must act on 1 or 2 qubits.")
         self._prob = prob
 
+    @property
+    def prob(self):
+        return self._prob
+
     cdef int apply_to(self, Qureg c_register) except -1:
         if self._num_targets == 1:
             quest.mixDephasing(c_register, self._targets[0], self._prob)
@@ -21,6 +25,9 @@ cdef class Dephasing(MultiQubitOperator):
         elif self._num_targets == 2:
             quest.mixTwoQubitDephasing(
                 c_register, self._targets[0], self._targets[1], self._prob)
+
+    def __repr__(self):
+        return type(self).__name__ + "(" + str(self.targets) + ", " + str(self._prob) + ")"
 
 
 cdef class Depolarising(MultiQubitOperator):
