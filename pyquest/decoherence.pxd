@@ -1,4 +1,5 @@
 from libc.stdlib cimport malloc, free
+from libc.math cimport sqrt
 cimport numpy as np
 cimport pyquest.quest_interface as quest
 from pyquest.quest_interface cimport qreal, qcomp, Qureg
