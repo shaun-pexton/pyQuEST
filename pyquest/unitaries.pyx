@@ -452,58 +452,6 @@ cdef class PauliProduct(GlobalOperator):
         return paulis
 
 
-cdef class PauliProduct(GlobalOperator):
-
-    PAULI_REPR = {0: '', 1: 'X', 2: 'Y', 3: 'Z'}
-
-    def __cinit__(self, pauli_terms):
-        cdef PauliOperator factor
-        if isinstance(pauli_terms, BaseOperator):
-            pauli_terms = [pauli_terms]
-        if any([factor._num_controls for factor in pauli_terms]):
-            raise ValueError("No controlled operators are allowed in PauliProduct.")
-        self._num_qubits = max([factor._target for factor in pauli_terms] + [0]) + 1  # 0-based idx
-        self._pauli_types = <pauliOpType*>calloc(self._num_qubits, sizeof(self._pauli_types[0]))
-        for factor in pauli_terms:
-            if self._pauli_types[factor._target] != 0:
-                raise ValueError("Each qubit can only have one Pauli operator.")
-            if isinstance(factor, X):
-                self._pauli_types[factor._target] = pauliOpType.PAULI_X
-            elif isinstance(factor, Y):
-                self._pauli_types[factor._target] = pauliOpType.PAULI_Y
-            elif isinstance(factor, Z):
-                self._pauli_types[factor._target] = pauliOpType.PAULI_Z
-            else:
-                raise ValueError("Only X, Y, and Z operators "
-                                 "are valid in pauli_terms")
-
-    def __dealloc__(self):
-        free(self._pauli_types)
-
-    def __repr__(self):
-        cdef size_t k
-        cdef pauli_str = ""
-        for k in range(self._num_qubits):
-            if self._pauli_types[k] > 0:
-                pauli_str += (self.PAULI_REPR[self._pauli_types[k]]
-                              + "(" + str(k) + "), ")
-        pauli_str = pauli_str[:-2]  # cut off last comma
-        return type(self).__name__ + "([" + pauli_str + "])"
-
-    @property
-    def targets(self):
-        return [k for k in range(self._num_qubits)
-                if self._pauli_codes[k] > 0]
-
-    @property
-    def controls(self):
-        return []
-
-    @property
-    def inverse(self):
-        return self
-
-
 cdef class Swap(MultiQubitOperator):
 
     def __cinit__(self, targets=None, target=None):
