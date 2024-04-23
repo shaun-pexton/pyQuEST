@@ -534,6 +534,15 @@ cdef class PauliSum(GlobalOperator):
     def terms(self):
         return self._node_terms(self._root, [])
 
+    cpdef qreal expectation_value(PauliSum self, reg):
+        cdef Qureg c_register = (<Qureg*>PyCapsule_GetPointer(reg.c_register_capsule, NULL))[0]
+        self._update_quest_hamil(c_register.numQubitsRepresented)
+        cdef QuESTEnv *env_ptr = <QuESTEnv*>PyCapsule_GetPointer(pyquest.env.env_capsule, NULL)
+        cdef Qureg temp_reg = quest.createCloneQureg(c_register, env_ptr[0])
+        cdef qreal expec = quest.calcExpecPauliHamil(c_register, self._quest_hamil, temp_reg)
+        quest.destroyQureg(temp_reg, env_ptr[0])
+        return expec
+
     cpdef void round(PauliSum self, qreal eps):
         PauliSum._round_node(self._root, eps)
         self._cache_valid = 0
@@ -554,6 +563,7 @@ cdef class PauliSum(GlobalOperator):
         cdef QuESTEnv *env_ptr = <QuESTEnv*>PyCapsule_GetPointer(pyquest.env.env_capsule, NULL)
         cdef Qureg temp_reg = quest.createCloneQureg(c_register, env_ptr[0])
         quest.applyPauliHamil(temp_reg, self._quest_hamil, c_register)
+        quest.destroyQureg(temp_reg, env_ptr[0])
 
     cdef int _update_quest_hamil(self, int num_qubits) except -1:
         cdef int num_tree_qubits = PauliSum._num_subtree_qubits(self._root) - 1

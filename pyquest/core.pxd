@@ -28,6 +28,7 @@ cdef class QuESTEnvironment:
 cdef class Register:
     cdef object __weakref__  # Makes Register weak-refable in Cython
     cdef Qureg c_register
+    cdef object _c_register_capsule
     cdef object _borrowed_from
     cdef object _borrowers
     cdef Complex _scaling_factor

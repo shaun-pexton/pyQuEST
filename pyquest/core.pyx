@@ -213,6 +213,12 @@ cdef class Register:
                 copy_reg.c_register, (<QuESTEnvironment>pyquest.env).c_env)
         logger.info("Created quantum register at " + hex(id(self)))
         (<QuESTEnvironment>pyquest.env).log_register(self)
+        self._c_register_capsule = PyCapsule_New(<void*>&self.c_register, NULL, NULL)
+
+
+    @property
+    def c_register_capsule(self):
+        return self._c_register_capsule
 
     def __dealloc__(self):
         self._destroy()

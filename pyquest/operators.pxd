@@ -66,6 +66,7 @@ cdef class PauliSum(GlobalOperator):
     cdef int _cache_valid
     cpdef void round(PauliSum self, qreal eps)
     cpdef void compress(PauliSum self, qreal eps)
+    cpdef qreal expectation_value(self, reg)
     cpdef PauliSum copy(self)
     cdef int _update_quest_hamil(self, int num_qubits) except -1
     cdef int _add_term_from_PauliProduct(self, coeff, pauli_product) except -1

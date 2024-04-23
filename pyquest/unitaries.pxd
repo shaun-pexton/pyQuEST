@@ -91,5 +91,7 @@ cdef class RotateAroundAxis(BaseRotate):
 cdef class R(GlobalOperator):
     cdef qreal _angle
     cdef size_t _num_qubits
+    cdef int _num_controls
+    cdef int* _controls
     cdef int* _qubits
     cdef pauliOpType* _pauli_types

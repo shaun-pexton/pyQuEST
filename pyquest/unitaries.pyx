@@ -306,6 +306,8 @@ cdef class PauliProduct(GlobalOperator):
 
     PAULI_REPR = {0: '', 1: 'X', 2: 'Y', 3: 'Z'}
 
+    PAULI_OP_EQUIV = {1: X, 2: Y, 3: Z}
+
     MULTIPLICATION_TABLE = np.array([[0, 1, 2, 3],
                                      [1, 0, 3, 2],
                                      [2, 3, 0, 1],
@@ -323,6 +325,11 @@ cdef class PauliProduct(GlobalOperator):
         cdef PauliOperator factor
         if isinstance(pauli_factors, BaseOperator):
             pauli_factors = [pauli_factors]
+        # Try to parse from a list of integers
+        if all(isinstance(p, int) for p in pauli_factors):
+            pauli_factors = [self.PAULI_OP_EQUIV[p](k)
+                             for k, p in enumerate(pauli_factors)
+                             if p in self.PAULI_OP_EQUIV.keys()]
         if any([factor._num_controls for factor in pauli_factors]):
             raise ValueError("No controlled operators are allowed in PauliProduct.")
         self._num_qubits = max([factor._target for factor in pauli_factors] + [0]) + 1  # 0-based
@@ -692,19 +699,26 @@ cdef class R(GlobalOperator):
 
     PAULI_REPR = {0: '', 1: 'X', 2: 'Y', 3: 'Z'}
 
-    def __cinit__(self, pauli_operators, angle):
+    def __cinit__(self, pauli_operators, angle, controls=None):
         self.TYPE = OP_TYPES.OP_MULTI_ROTATE
         self._angle = angle
-        if isinstance(pauli_operators, PauliOperator):
-            pauli_operators = PauliProduct(pauli_operators)
+        if controls is None:
+            controls = []
+        self._num_controls = len(controls)
+        self._controls = <int*>malloc(self._num_controls * sizeof(self._controls[0]))
+        cdef size_t k
+        for k in range(self._num_controls):
+            self._controls[k] = controls[k]
         if not isinstance(pauli_operators, PauliProduct):
-            raise TypeError("Only Pauli operators and PauliProducts are "
-                            "allowd as pauli_operators.")
+            try:
+                pauli_operators = PauliProduct(pauli_operators)
+            except ValueError, TypeError:
+                raise TypeError("Only Pauli operators and PauliProducts are "
+                                "allowed as pauli_operators.")
         self._num_qubits = (<PauliProduct>pauli_operators)._num_qubits
         self._pauli_types = <pauliOpType*>malloc(
             self._num_qubits * sizeof(self._pauli_types[0]))
         self._qubits = <int*>malloc(self._num_qubits * sizeof(self._qubits[0]))
-        cdef size_t k
         for k in range(self._num_qubits):
             self._qubits[k] = k
             self._pauli_types[k] = (<PauliProduct>pauli_operators)._pauli_types[k]
@@ -712,6 +726,11 @@ cdef class R(GlobalOperator):
     def __dealloc__(self):
         free(self._pauli_types)
         free(self._qubits)
+        free(self._controls)
+
+    @property
+    def controls(self):
+        return [self._controls[k] for k in range(self._num_controls)]
 
     def __repr__(self):
         cdef size_t k
@@ -720,17 +739,25 @@ cdef class R(GlobalOperator):
             if self._pauli_types[k] > 0:
                 pauli_str += (self.PAULI_REPR[self._pauli_types[k]]
                               + "(" + str(k) + ") * ")
+        ctrl = ""
+        if self._num_controls > 0:
+            ctrl = ", controls=" + str(self.controls)
         pauli_str = pauli_str[:-3]  # cut off last asterisk
-        return type(self).__name__ + "(" + pauli_str + ", " + str(self._angle) + ")"
+        return type(self).__name__ + "(" + pauli_str + ", " + str(self._angle) + ctrl + ")"
 
     cdef int apply_to(self, Qureg c_register) except -1:
         if c_register.numQubitsRepresented < self._num_qubits:
             raise ValueError(
                 f"Register does not have enough qubits for this operator. "
                 f"Required {self._num_qubits}, only got {c_register.numQubitsRepresented}")
-        quest.multiRotatePauli(
-            c_register, self._qubits, self._pauli_types,
-            self._num_qubits, self._angle)
+        if self._num_controls == 0:
+            quest.multiRotatePauli(
+                c_register, self._qubits, self._pauli_types,
+                self._num_qubits, self._angle)
+        else:
+            quest.multiControlledMultiRotatePauli(
+                c_register, self._controls, self._num_controls, self._qubits,
+                self._pauli_types, self._num_qubits, self._angle)
 
 Unitary = U
 CompactUnitary = CompactU

@@ -172,6 +172,7 @@ cdef extern from "QuEST.h":
         qreal* overridePhases, int numOverrides) except +
     void applyPauliSum(Qureg inQureg, pauliOpType* allPauliCodes,
                        qreal* termCoeffs, int numSumTerms, Qureg outQureg) except +
+    qreal calcExpecPauliHamil(Qureg qureg, PauliHamil hamil, Qureg workspace) except +
     void applyPauliHamil(Qureg inQureg, PauliHamil hamil, Qureg outQureg) except +
     void applyTrotterCircuit(Qureg qureg, PauliHamil hamil, qreal time,
                              int order, int reps) except +
@@ -217,10 +218,13 @@ cdef extern from "QuEST.h":
         Qureg qureg, int controlQubit, int targetQubit, qreal angle,
         Vector axis) except +
     void multiRotateZ(
-        Qureg qureg, int* qubits, int numQubits, qreal angle) except +
+        Qureg qureg, int *qubits, int numQubits, qreal angle) except +
     void multiRotatePauli(
-        Qureg qureg, int* targetQubits, pauliOpType* targetPaulis,
+        Qureg qureg, int *targetQubits, pauliOpType *targetPaulis,
         int numTargets, qreal angle) except +
+    void multiControlledMultiRotatePauli(
+        Qureg qureg, int *controlQubits, int numControls, int *targetQubits,
+        pauliOpType *targetPaulis, int numTargets, qreal angle) except +
     void hadamard(Qureg qureg, int targetQubit) except +
     void sGate(Qureg qureg, int targetQubit) except +
     void tGate(Qureg qureg, int targetQubit) except +
