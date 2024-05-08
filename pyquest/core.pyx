@@ -677,9 +677,10 @@ cdef class Register:
 
     cpdef init_blank_state(self):
         """Set all amplitudes to zero."""
+        self._ensure_no_borrow()
         quest.initBlankState(self.c_register)
-        self._coefficient.real = 1
-        self._coefficient.imag = 0
+        self._scaling_factor.real = 1
+        self._scaling_factor.imag = 0
 
     @staticmethod
     def zero_like(Register other):
