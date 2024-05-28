@@ -35,7 +35,7 @@ cdef extern from "QuEST.h":
     # Data structures
     ctypedef struct QuESTEnv:
         int rank
-        int num_ranks
+        int numRanks
         int numSeeds
         unsigned long int *seeds
     ctypedef struct Complex:
