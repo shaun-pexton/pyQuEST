@@ -36,6 +36,8 @@ cdef extern from "QuEST.h":
     ctypedef struct QuESTEnv:
         int rank
         int num_ranks
+        int numSeeds
+        unsigned long int *seeds
     ctypedef struct Complex:
         qreal real
         qreal imag
@@ -89,6 +91,8 @@ cdef extern from "QuEST.h":
     QuESTEnv createQuESTEnv() except +
     void destroyQuESTEnv(QuESTEnv env) except +
     void getEnvironmentString(QuESTEnv env, char str[200])
+    void getQuESTSeeds(QuESTEnv env, unsigned long int **seeds, int *numSeeds)
+    void seedQuEST(QuESTEnv *env, unsigned long int *seedArray, int numSeeds)
 
     # Quantum register methods
     Qureg createQureg(int numQubits, QuESTEnv env) except +

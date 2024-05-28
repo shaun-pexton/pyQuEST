@@ -145,6 +145,32 @@ cdef class QuESTEnvironment:
         """
         return self.c_env.rank
 
+    @property
+    def seeds(self):
+        seed_list = []
+        cdef int k
+        for k in range(self.c_env.numSeeds):
+            seed_list.append(self.c_env.seeds[k])
+        return seed_list
+
+    @seeds.setter
+    def seeds(self, val):
+        cdef int num_seeds
+        try:
+            num_seeds = len(val)
+        except TypeError:
+            val = [val]
+            num_seeds = 1
+        cdef unsigned long *seeds = <unsigned long*>malloc(sizeof(seeds[0]) * num_seeds)
+        cdef int k
+        for k in range(num_seeds):
+            seeds[k] = val[k]
+            if seeds[k] != val[k]:
+                free(seeds)
+                raise ValueError("Seeds for QuEST may only be positive integers.")
+        quest.seedQuEST(&(self.c_env), seeds, num_seeds)
+        free(seeds)
+
     def close_env(self):
         """Close the QuEST environment.
 
